@@ -1,45 +1,20 @@
-# Flask example
-from flask import Flask
 
-app = Flask(__name__)
-
-@app.route("/")
-def index():
-    return "OK"
 import os
 import gradio as gr
 
-from typing import TypedDict, Annotated, List
-from langgraph.graph import StateGraph, END
-from langgraph.graph.message import add_messages
+from fastapi import FastAPI
+from typing import TypedDict, List
 
-from langchain_core.messages import HumanMessage, AIMessage
+from langgraph.graph import StateGraph, END
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 
 
 # ==========================================
-# 1. GROQ API CONFIGURATION
-# ==========================================
-
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-
-if not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY is missing. Add it in Render environment variables.")
-
-llm = ChatGroq(
-    model="openai/gpt-oss-20b",
-    groq_api_key=GROQ_API_KEY,
-    temperature=0
-)
-
-
-# ==========================================
-# 2. PLANNER STATE
+# 1. PLANNER STATE
 # ==========================================
 
 class PlannerState(TypedDict):
-    messages: Annotated[List[HumanMessage | AIMessage], add_messages]
     city: str
     interests: List[str]
     travel_style: str
@@ -50,7 +25,7 @@ class PlannerState(TypedDict):
 
 
 # ==========================================
-# 3. ITINERARY PROMPT
+# 2. ITINERARY PROMPT
 # ==========================================
 
 itinerary_prompt = ChatPromptTemplate.from_messages([
@@ -64,6 +39,7 @@ itinerary_prompt = ChatPromptTemplate.from_messages([
         duration, budget and additional requirements.
 
         Include:
+
         1. Destination introduction.
         2. Day-by-day travel plan.
         3. Tourist attractions and activities.
@@ -94,44 +70,57 @@ itinerary_prompt = ChatPromptTemplate.from_messages([
 
 
 # ==========================================
-# 4. LANGGRAPH NODES
+# 3. LANGGRAPH NODES
 # ==========================================
 
 def input_city(state: PlannerState):
     if not state["city"].strip():
         raise ValueError("Please enter a destination city.")
+
     return {}
 
 
 def input_interest(state: PlannerState):
     if not state["interests"]:
         raise ValueError("Please select at least one interest.")
+
     return {}
 
 
 def input_itinerary(state: PlannerState):
 
-    response = llm.invoke(
-        itinerary_prompt.format_messages(
-            city=state["city"],
-            interests=", ".join(state["interests"]),
-            travel_style=state["travel_style"],
-            duration=state["duration"],
-            budget=state["budget"],
-            extra_requirements=state["extra_requirements"]
+    api_key = os.environ.get("GROQ_API_KEY")
+
+    if not api_key:
+        raise ValueError(
+            "GROQ_API_KEY is missing. "
+            "Please configure it in Vercel Environment Variables."
         )
+
+    llm = ChatGroq(
+        model="openai/gpt-oss-20b",
+        groq_api_key=api_key,
+        temperature=0
     )
 
-    itinerary = response.content
+    prompt = itinerary_prompt.format_messages(
+        city=state["city"],
+        interests=", ".join(state["interests"]),
+        travel_style=state["travel_style"],
+        duration=state["duration"],
+        budget=state["budget"],
+        extra_requirements=state["extra_requirements"]
+    )
+
+    response = llm.invoke(prompt)
 
     return {
-        "itinerary": itinerary,
-        "messages": [AIMessage(content=itinerary)]
+        "itinerary": str(response.content)
     }
 
 
 # ==========================================
-# 5. LANGGRAPH WORKFLOW
+# 4. LANGGRAPH WORKFLOW
 # ==========================================
 
 workflow = StateGraph(PlannerState)
@@ -150,7 +139,7 @@ graph = workflow.compile()
 
 
 # ==========================================
-# 6. GENERATE ITINERARY
+# 5. GENERATE ITINERARY
 # ==========================================
 
 def generate_itinerary(
@@ -171,10 +160,7 @@ def generate_itinerary(
     try:
 
         initial_state = {
-            "messages": [
-                HumanMessage(content=f"Plan a trip to {city}")
-            ],
-            "city": city,
+            "city": city.strip(),
             "interests": interests,
             "travel_style": travel_style,
             "duration": duration,
@@ -195,13 +181,13 @@ def generate_itinerary(
         print("ERROR:", repr(e))
 
         return (
-            "### Something went wrong\n"
+            "### Something went wrong\n\n"
             f"**Error:** `{type(e).__name__}: {str(e)}`"
         )
 
 
 # ==========================================
-# 7. CUSTOM CSS
+# 6. CUSTOM CSS
 # ==========================================
 
 custom_css = """
@@ -223,7 +209,7 @@ custom_css = """
 
 
 # ==========================================
-# 8. GRADIO INTERFACE
+# 7. GRADIO INTERFACE
 # ==========================================
 
 with gr.Blocks(
@@ -262,37 +248,56 @@ with gr.Blocks(
 
             interests = gr.CheckboxGroup(
                 choices=[
-                    "Adventure", "Food", "History", "Nature",
-                    "Shopping", "Beaches", "Culture",
-                    "Nightlife", "Photography"
+                    "Adventure",
+                    "Food",
+                    "History",
+                    "Nature",
+                    "Shopping",
+                    "Beaches",
+                    "Culture",
+                    "Nightlife",
+                    "Photography"
                 ],
                 label="Your Interests"
             )
 
             travel_style = gr.Radio(
-                choices=["Relaxed", "Balanced", "Fast-paced"],
+                choices=[
+                    "Relaxed",
+                    "Balanced",
+                    "Fast-paced"
+                ],
                 value="Balanced",
                 label="Travel Style"
             )
 
             duration = gr.Dropdown(
                 choices=[
-                    "1-2 Days", "3-5 Days",
-                    "6-7 Days", "1-2 Weeks"
+                    "1-2 Days",
+                    "3-5 Days",
+                    "6-7 Days",
+                    "1-2 Weeks"
                 ],
                 value="3-5 Days",
                 label="Trip Duration"
             )
 
             budget = gr.Dropdown(
-                choices=["Budget", "Moderate", "Luxury"],
+                choices=[
+                    "Budget",
+                    "Moderate",
+                    "Luxury"
+                ],
                 value="Moderate",
                 label="Travel Budget"
             )
 
             extra_requirements = gr.Textbox(
                 label="Additional Requirements",
-                placeholder="e.g. Vegetarian food, family-friendly places...",
+                placeholder=(
+                    "e.g. Vegetarian food, "
+                    "family-friendly places..."
+                ),
                 lines=3
             )
 
@@ -335,15 +340,16 @@ with gr.Blocks(
 
 
 # ==========================================
-# 9. LAUNCH APPLICATION
+# 8. VERCEL APPLICATION ENTRY POINT
 # ==========================================
 
-if __name__ == "__main__":
+fastapi_app = FastAPI(
+    title="AI Travel Planner",
+    description="AI-powered personalized travel itinerary generator"
+)
 
-    port = int(os.environ.get("PORT", 10000))
-
-    demo.launch(
-        server_name="0.0.0.0",
-        server_port=port,
-        share=False
-    )
+app = gr.mount_gradio_app(
+    fastapi_app,
+    demo,
+    path="/"
+)
