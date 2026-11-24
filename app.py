@@ -1,4 +1,11 @@
+# Flask example
+from flask import Flask
 
+app = Flask(__name__)
+
+@app.route("/")
+def index():
+    return "OK"
 import os
 import gradio as gr
 
